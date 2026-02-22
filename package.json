@@ -1,0 +1,37 @@
+{
+  "name": "chat-tree",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@google/generative-ai": "^0.21.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@pinia/nuxt": "^0.10.1",
+    "@prisma/client": "^6.3.0",
+    "marked": "^15.0.6",
+    "nuxt": "^3.15.0",
+    "nuxt-auth-utils": "^0.5.9",
+    "pinia": "^3.0.1",
+    "playwright": "^1.58.2"
+  },
+  "devDependencies": {
+    "@nuxtjs/tailwindcss": "^6.13.2",
+    "@tailwindcss/typography": "^0.5.16",
+    "@vueuse/core": "^12.4.0",
+    "@vueuse/nuxt": "^12.4.0",
+    "prisma": "^6.3.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  }
+}

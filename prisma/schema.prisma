@@ -1,0 +1,71 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String        @id @default(cuid())
+  email     String        @unique
+  name      String?
+  avatar    String?
+  createdAt DateTime      @default(now())
+  trees     Tree[]
+  settings  UserSettings?
+}
+
+model UserSettings {
+  id                   String @id @default(cuid())
+  userId               String @unique
+  systemPrompt         String @default("")
+  enabledModels        String @default("[]")  // JSON: {value,label,free?}[]
+  defaultConvModel     String @default("openrouter/deepseek/deepseek-chat-v3-0324")
+  defaultConvVerbosity String @default("normal")
+  defaultBranchModel   String @default("openrouter/deepseek/deepseek-chat-v3-0324")
+  defaultBranchVerbosity String @default("normal")
+  user                 User   @relation(fields: [userId], references: [id])
+}
+
+model Tree {
+  id            String         @id @default(cuid())
+  userId        String
+  title         String
+  createdAt     DateTime       @default(now())
+  user          User           @relation(fields: [userId], references: [id])
+  conversations Conversation[]
+}
+
+model Conversation {
+  id              String         @id @default(cuid())
+  treeId          String
+  parentId        String?
+  title           String
+  model           String         @default("openrouter/deepseek/deepseek-chat-v3-0324")
+  verbosity       String         @default("normal")
+  branchText      String?
+  branchMessageId String?
+  branchSummary   String?
+  summaryCache    String    @default("{}") // JSON: { [messageId]: summary }
+  closedAt        DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime       @default(now())
+  tree            Tree           @relation(fields: [treeId], references: [id], onDelete: Cascade)
+  parent          Conversation?  @relation("ConversationChildren", fields: [parentId], references: [id])
+  children        Conversation[] @relation("ConversationChildren")
+  messages        Message[]
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           String
+  content        String
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}

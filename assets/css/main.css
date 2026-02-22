@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+}
+
+@layer utilities {
+  .branch-mark {
+    background-color: rgb(253 230 138 / 0.75);
+    border-radius: 3px;
+    padding: 0 2px;
+    color: inherit;
+    font-style: normal;
+  }
+  .dark .branch-mark {
+    background-color: rgb(217 119 6 / 0.35);
+  }
+}

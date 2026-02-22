@@ -30,20 +30,36 @@ export default defineEventHandler(async (event) => {
     where: { userId: session.user.id },
   })
   const systemPrompt = settings?.systemPrompt || ''
+  const streamingEnabled = settings?.streamingEnabled !== false // default true
 
   // Build context for LLM
   const messages = await buildContext(id!, systemPrompt, conversation.verbosity)
 
-  // Set up SSE
+  const llm = getLLMProvider(conversation.model)
+  let fullResponse = ''
+
+  if (!streamingEnabled) {
+    // Non-streaming: collect full response and return as JSON
+    try {
+      await llm.streamChat(messages, (chunk) => { fullResponse += chunk }, conversation.model)
+      await prisma.message.create({
+        data: { conversationId: id!, role: 'assistant', content: fullResponse },
+      })
+      return { content: fullResponse }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('LLM error:', msg)
+      throw createError({ statusCode: 500, message: 'LLM error occurred' })
+    }
+  }
+
+  // Streaming: SSE
   setResponseHeaders(event, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no',
   })
-
-  const llm = getLLMProvider(conversation.model)
-  let fullResponse = ''
 
   try {
     await llm.streamChat(
@@ -55,7 +71,6 @@ export default defineEventHandler(async (event) => {
       conversation.model
     )
 
-    // Save assistant message
     await prisma.message.create({
       data: { conversationId: id!, role: 'assistant', content: fullResponse },
     })

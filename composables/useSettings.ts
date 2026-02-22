@@ -13,6 +13,7 @@ export interface Settings {
   defaultConvVerbosity: string
   defaultBranchModel: string
   defaultBranchVerbosity: string
+  streamingEnabled: boolean
 }
 
 const FALLBACK_MODEL = 'openrouter/deepseek/deepseek-chat-v3-0324'

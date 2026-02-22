@@ -27,6 +27,15 @@ export function useLLM() {
         throw new Error(`HTTP ${response.status}`)
       }
 
+      // Non-streaming: server returns JSON
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.includes('text/event-stream')) {
+        await response.json()
+        store.finishStreaming()
+        await loadMessages(conversationId)
+        return
+      }
+
       const reader = response.body?.getReader()
       if (!reader) throw new Error('No response body')
 

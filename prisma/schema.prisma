@@ -29,6 +29,7 @@ model UserSettings {
   defaultConvVerbosity String @default("normal")
   defaultBranchModel   String @default("openrouter/deepseek/deepseek-chat-v3-0324")
   defaultBranchVerbosity String @default("normal")
+  streamingEnabled     Boolean @default(true)
   user                 User   @relation(fields: [userId], references: [id])
 }
 

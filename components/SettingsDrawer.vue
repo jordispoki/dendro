@@ -13,6 +13,7 @@ const defaultConvModel = ref('openrouter/deepseek/deepseek-chat-v3-0324')
 const defaultConvVerbosity = ref('normal')
 const defaultBranchModel = ref('openrouter/deepseek/deepseek-chat-v3-0324')
 const defaultBranchVerbosity = ref('normal')
+const streamingEnabled = ref(true)
 
 watch(() => settings.value, (s) => {
   if (!s) return
@@ -20,6 +21,7 @@ watch(() => settings.value, (s) => {
   defaultConvVerbosity.value = s.defaultConvVerbosity
   defaultBranchModel.value = s.defaultBranchModel
   defaultBranchVerbosity.value = s.defaultBranchVerbosity
+  streamingEnabled.value = s.streamingEnabled !== false
 }, { immediate: true })
 
 const enabledModelGroups = useEnabledModelGroups()
@@ -121,6 +123,7 @@ async function handleSave() {
       defaultConvVerbosity: defaultConvVerbosity.value,
       defaultBranchModel: defaultBranchModel.value,
       defaultBranchVerbosity: defaultBranchVerbosity.value,
+      streamingEnabled: streamingEnabled.value,
     })
     savedMessage.value = 'Saved!'
     setTimeout(() => { savedMessage.value = '' }, 2000)
@@ -253,6 +256,29 @@ const openrouterEnabledCount = computed(() =>
                   </select>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- Streaming -->
+          <div>
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Streaming</h3>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Show responses token by token as they arrive.</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="streamingEnabled"
+                class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                :class="streamingEnabled ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700'"
+                @click="streamingEnabled = !streamingEnabled"
+              >
+                <span
+                  class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition duration-200"
+                  :class="streamingEnabled ? 'translate-x-4' : 'translate-x-0'"
+                />
+              </button>
             </div>
           </div>
 

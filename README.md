@@ -12,7 +12,7 @@ A tree-structured LLM chat app. Instead of linear conversations, every message c
 - **Multi-provider LLM** — Gemini and OpenRouter models, switchable per conversation
 - **Streaming responses** — SSE-based token streaming
 - **Text selection popup** — Branch, Search, and Summarize-to-clipboard actions
-- **Global settings** — system prompt, default models and verbosity for new conversations and branches
+- **Global settings** — system prompt, default models and verbosity for new conversations and branches, streaming on/off
 - **Auth** — GitHub OAuth, Google OAuth, magic link email
 
 ## Tech stack

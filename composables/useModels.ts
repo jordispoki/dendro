@@ -47,7 +47,7 @@ export function filterFreeGroups(groups: ModelGroup[]): ModelGroup[] {
     .filter((g) => g.models.length > 0)
 }
 
-function groupModels(models: ModelOption[]): ModelGroup[] {
+export function groupModels(models: ModelOption[]): ModelGroup[] {
   const google = models.filter((m) => m.value.startsWith('google/'))
   const openrouter = models.filter((m) => m.value.startsWith('openrouter/'))
   const groups: ModelGroup[] = []

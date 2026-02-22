@@ -2,6 +2,7 @@
 import { useTreeStore } from '~/stores/treeStore'
 import { useConversationTree } from '~/composables/useConversationTree'
 import { useLLM } from '~/composables/useLLM'
+import { useProjectFiles } from '~/composables/useProjectFiles'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -10,6 +11,7 @@ const store = useTreeStore()
 const { visibleColumns } = useConversationTree()
 const { openSettings, fetchSettings } = useSettings()
 const { openConvSettings } = useConvSettings()
+const { fetchFiles, openFiles } = useProjectFiles()
 const { user, clear } = useUserSession()
 const { sendMessage } = useLLM()
 const router = useRouter()
@@ -38,6 +40,7 @@ onMounted(async () => {
     const tree = await $fetch<any>(`/api/trees/${treeId.value}`)
     treeTitle.value = tree.title
     store.loadTree(tree)
+    fetchFiles(treeId.value)
 
     isLoading.value = false
 
@@ -106,13 +109,17 @@ async function closeActiveConversation() {
 
 async function deleteActiveConversation() {
   if (!activeConversation.value) return
-  if (!confirm('Delete this branch and all its descendants?')) return
+  if (!confirm('Are you sure you want to delete this conversation and all its descendants?')) return
+
+  const id = activeConversation.value.id
+  const isRoot = !activeConversation.value.parentId
   try {
-    await $fetch(`/api/conversations/${activeConversation.value.id}`, {
+    await $fetch(`/api/conversations/${id}`, {
       method: 'PATCH',
       body: { deletedAt: new Date().toISOString() },
     })
-    store.softDeleteConversation(activeConversation.value.id)
+    store.softDeleteConversation(id)
+    if (isRoot) navigateTo('/')
   } catch (err) {
     console.error('Delete error:', err)
   }
@@ -133,7 +140,7 @@ async function logout() {
       <NuxtLink
         to="/"
         class="text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors shrink-0"
-        title="Back to trees"
+        title="Back to dendros"
       >
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -194,15 +201,14 @@ async function logout() {
         </svg>
       </button>
 
-      <!-- Delete branch (only for branch conversations) -->
+      <!-- Dendro Context -->
       <button
-        v-if="activeConversation?.parentId"
-        class="text-gray-400 hover:text-red-500 transition-colors shrink-0"
-        title="Delete branch"
-        @click="deleteActiveConversation"
+        class="text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors shrink-0"
+        title="Dendro Context"
+        @click="openFiles()"
       >
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
         </svg>
       </button>
 
@@ -277,5 +283,8 @@ async function logout() {
 
     <!-- Settings drawer -->
     <SettingsDrawer />
+
+    <!-- Project files drawer -->
+    <ProjectFilesDrawer :tree-id="treeId" />
   </div>
 </template>

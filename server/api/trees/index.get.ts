@@ -3,7 +3,7 @@ import { prisma } from '~/server/utils/prisma'
 export default defineEventHandler(async (event) => {
   const session = await requireUserSession(event)
   const trees = await prisma.tree.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, deletedAt: null },
     orderBy: { createdAt: 'desc' },
     include: {
       conversations: {

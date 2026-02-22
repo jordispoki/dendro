@@ -21,7 +21,7 @@ export default defineNuxtConfig({
     resendApiKey: '',          // set via NUXT_RESEND_API_KEY in .env
     fromEmail: 'noreply@chat-tree.app',  // set via NUXT_FROM_EMAIL in .env
     public: {
-      appName: 'Chat Tree',
+      appName: 'Dendro',
     },
   },
   nitro: {

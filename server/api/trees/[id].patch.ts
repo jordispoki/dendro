@@ -14,6 +14,7 @@ export default defineEventHandler(async (event) => {
     where: { id },
     data: {
       ...(body.title !== undefined ? { title: body.title } : {}),
+      ...(body.deletedAt !== undefined ? { deletedAt: new Date(body.deletedAt) } : {}),
     },
   })
 

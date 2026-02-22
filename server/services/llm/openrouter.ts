@@ -1,4 +1,4 @@
-import type { ChatMessage, LLMProvider } from './index'
+import type { ChatMessage, LLMProvider, UsageMetadata } from './index'
 
 const BASE_URL = 'https://openrouter.ai/api/v1'
 const DEFAULT_MODEL = 'openai/gpt-4o-mini'
@@ -28,7 +28,7 @@ export class OpenRouterProvider implements LLMProvider {
     messages: ChatMessage[],
     onChunk: (chunk: string) => void,
     model = DEFAULT_MODEL
-  ): Promise<void> {
+  ): Promise<UsageMetadata> {
     const apiKey = this.getApiKey()
 
     const response = await fetch(`${BASE_URL}/chat/completions`, {
@@ -51,6 +51,7 @@ export class OpenRouterProvider implements LLMProvider {
 
     const decoder = new TextDecoder()
     let buffer = ''
+    let usageData = { prompt_tokens: 0, completion_tokens: 0 }
 
     while (true) {
       const { done, value } = await reader.read()
@@ -63,9 +64,10 @@ export class OpenRouterProvider implements LLMProvider {
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue
         const data = line.slice(6).trim()
-        if (data === '[DONE]') return
+        if (data === '[DONE]') break
         try {
           const parsed = JSON.parse(data)
+          if (parsed.usage) usageData = parsed.usage
           const content = parsed.choices?.[0]?.delta?.content
           if (content) onChunk(content)
         } catch {
@@ -73,6 +75,8 @@ export class OpenRouterProvider implements LLMProvider {
         }
       }
     }
+
+    return { inputTokens: usageData.prompt_tokens, outputTokens: usageData.completion_tokens }
   }
 
   async summarize(messages: ChatMessage[], model = DEFAULT_MODEL): Promise<string> {

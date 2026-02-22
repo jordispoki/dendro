@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { useSettings, type ModelEntry } from '~/composables/useSettings'
-import { useEnabledModelGroups, filterFreeGroups } from '~/composables/useModels'
+import { useEnabledModelGroups, filterFreeGroups, groupModels, type ModelOption } from '~/composables/useModels'
 
 const { settings, isSettingsOpen, saveSettings, closeSettings } = useSettings()
+const { dangerMode, toggleDangerMode } = useConvSettings()
 
 // ── System prompt ──────────────────────────────────────────────
 const systemPrompt = ref('')
@@ -14,6 +15,9 @@ const defaultConvVerbosity = ref('normal')
 const defaultBranchModel = ref('openrouter/deepseek/deepseek-chat-v3-0324')
 const defaultBranchVerbosity = ref('normal')
 const streamingEnabled = ref(true)
+const localExecutionEnabled = ref(false)
+const urlFetchSameDomain = ref(false)
+const homeLayout = ref<'select' | 'classic'>('select')
 
 watch(() => settings.value, (s) => {
   if (!s) return
@@ -22,6 +26,9 @@ watch(() => settings.value, (s) => {
   defaultBranchModel.value = s.defaultBranchModel
   defaultBranchVerbosity.value = s.defaultBranchVerbosity
   streamingEnabled.value = s.streamingEnabled !== false
+  localExecutionEnabled.value = s.localExecutionEnabled === true
+  urlFetchSameDomain.value = s.urlFetchSameDomain === true
+  homeLayout.value = (s.homeLayout as 'select' | 'classic') ?? 'select'
 }, { immediate: true })
 
 const enabledModelGroups = useEnabledModelGroups()
@@ -40,11 +47,23 @@ const isLoadingGoogle = ref(false)
 const isLoadingOpenRouter = ref(false)
 const googleError = ref('')
 const openrouterError = ref('')
+const googleExpanded = ref(false)
+const openrouterExpanded = ref(false)
 
 // Per-provider search filters
 const googleSearch = ref('')
 const openrouterSearch = ref('')
 const onlyFreeOpenRouter = ref(false)
+
+// Live model groups — reflects current enabledSet (before saving) so Default pickers stay in sync
+const liveEnabledModelGroups = computed(() => {
+  if (enabledSet.value.size === 0) return enabledModelGroups.value
+  const allLoaded = [...googleModels.value, ...openrouterModels.value]
+  const allLoadedMap = Object.fromEntries(allLoaded.map((m) => [m.value, m]))
+  const savedMap = Object.fromEntries((settings.value?.enabledModels ?? []).map((m) => [m.value, m]))
+  const models = [...enabledSet.value].map((v) => allLoadedMap[v] ?? savedMap[v]).filter(Boolean) as ModelOption[]
+  return models.length ? groupModels(models) : enabledModelGroups.value
+})
 
 const filteredGoogle = computed(() => {
   const q = googleSearch.value.toLowerCase()
@@ -64,6 +83,7 @@ async function loadGoogleModels() {
   try {
     const data = await $fetch<{ models: ModelEntry[] }>('/api/providers/google/models')
     googleModels.value = data.models
+    googleExpanded.value = true
   } catch (err: any) {
     googleError.value = err?.data?.message ?? 'Failed to load'
   } finally {
@@ -77,6 +97,7 @@ async function loadOpenRouterModels() {
   try {
     const data = await $fetch<{ models: ModelEntry[] }>('/api/providers/openrouter/models')
     openrouterModels.value = data.models
+    openrouterExpanded.value = true
   } catch (err: any) {
     openrouterError.value = err?.data?.message ?? 'Failed to load'
   } finally {
@@ -124,6 +145,9 @@ async function handleSave() {
       defaultBranchModel: defaultBranchModel.value,
       defaultBranchVerbosity: defaultBranchVerbosity.value,
       streamingEnabled: streamingEnabled.value,
+      localExecutionEnabled: localExecutionEnabled.value,
+      urlFetchSameDomain: urlFetchSameDomain.value,
+      homeLayout: homeLayout.value,
     })
     savedMessage.value = 'Saved!'
     setTimeout(() => { savedMessage.value = '' }, 2000)
@@ -210,7 +234,7 @@ const openrouterEnabledCount = computed(() =>
                     v-model="defaultConvModel"
                     class="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
-                    <optgroup v-for="group in enabledModelGroups" :key="group.label" :label="group.label">
+                    <optgroup v-for="group in liveEnabledModelGroups" :key="group.label" :label="group.label">
                       <option v-for="m in group.models" :key="m.value" :value="m.value">{{ m.label }}</option>
                     </optgroup>
                   </select>
@@ -239,7 +263,7 @@ const openrouterEnabledCount = computed(() =>
                     v-model="defaultBranchModel"
                     class="w-full px-2.5 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
-                    <optgroup v-for="group in enabledModelGroups" :key="group.label" :label="group.label">
+                    <optgroup v-for="group in liveEnabledModelGroups" :key="group.label" :label="group.label">
                       <option v-for="m in group.models" :key="m.value" :value="m.value">{{ m.label }}</option>
                     </optgroup>
                   </select>
@@ -282,6 +306,108 @@ const openrouterEnabledCount = computed(() =>
             </div>
           </div>
 
+          <!-- Local Execution -->
+          <div>
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Local Execution</h3>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Run shell commands from the chat and send output to the LLM.</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="localExecutionEnabled"
+                class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                :class="localExecutionEnabled ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700'"
+                @click="localExecutionEnabled = !localExecutionEnabled"
+              >
+                <span
+                  class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition duration-200"
+                  :class="localExecutionEnabled ? 'translate-x-4' : 'translate-x-0'"
+                />
+              </button>
+            </div>
+          </div>
+
+          <!-- URL Fetch: Same-Domain Scraping -->
+          <div>
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Same-Domain Scraping</h3>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">When fetching a URL, also follow up to 5 internal links on the same domain.</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="urlFetchSameDomain"
+                class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                :class="urlFetchSameDomain ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700'"
+                @click="urlFetchSameDomain = !urlFetchSameDomain"
+              >
+                <span
+                  class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition duration-200"
+                  :class="urlFetchSameDomain ? 'translate-x-4' : 'translate-x-0'"
+                />
+              </button>
+            </div>
+          </div>
+
+          <!-- Home Layout -->
+          <div>
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Home Layout</h3>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  {{ homeLayout === 'select' ? 'Select: sidebar list + background.' : 'Classic: centered list.' }}
+                </p>
+              </div>
+              <div class="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden shrink-0">
+                <button
+                  :class="['px-2.5 py-1 text-xs font-medium transition-colors', homeLayout === 'select' ? 'bg-indigo-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800']"
+                  @click="homeLayout = 'select'"
+                >Select</button>
+                <button
+                  :class="['px-2.5 py-1 text-xs font-medium transition-colors', homeLayout === 'classic' ? 'bg-indigo-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800']"
+                  @click="homeLayout = 'classic'"
+                >Classic</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Danger Zone -->
+          <div
+            :class="[
+              'rounded-lg border p-4 transition-colors duration-200',
+              dangerMode
+                ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20'
+                : 'border-gray-200 dark:border-gray-700',
+            ]"
+          >
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-sm font-medium" :class="dangerMode ? 'text-red-700 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'">
+                  Danger mode
+                </p>
+                <p class="text-xs mt-0.5" :class="dangerMode ? 'text-red-500 dark:text-red-400' : 'text-gray-400 dark:text-gray-500'">
+                  {{ dangerMode ? 'Deleting a dendro will permanently remove it.' : 'Enables permanent (hard) delete for dendros.' }}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="dangerMode"
+                class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                :class="dangerMode ? 'bg-red-500' : 'bg-gray-200 dark:bg-gray-700'"
+                @click="toggleDangerMode"
+              >
+                <span
+                  class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition duration-200"
+                  :class="dangerMode ? 'translate-x-4' : 'translate-x-0'"
+                />
+              </button>
+            </div>
+          </div>
+
           <!-- Providers & Models -->
           <div>
             <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Providers &amp; Models</h3>
@@ -292,7 +418,21 @@ const openrouterEnabledCount = computed(() =>
             <!-- Google Gemini -->
             <div class="mb-4 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
               <div class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800">
-                <span class="text-xs font-semibold text-gray-600 dark:text-gray-300">Google Gemini</span>
+                <button
+                  v-if="googleModels.length"
+                  class="flex items-center gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+                  @click="googleExpanded = !googleExpanded"
+                >
+                  <svg
+                    class="w-3 h-3 transition-transform duration-150"
+                    :class="googleExpanded ? 'rotate-90' : ''"
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                  Google Gemini
+                </button>
+                <span v-else class="text-xs font-semibold text-gray-600 dark:text-gray-300">Google Gemini</span>
                 <div class="flex items-center gap-2">
                   <span v-if="googleEnabledCount" class="text-xs text-indigo-500">{{ googleEnabledCount }} selected</span>
                   <button
@@ -305,7 +445,7 @@ const openrouterEnabledCount = computed(() =>
                 </div>
               </div>
 
-              <div v-if="googleModels.length" class="px-3 py-2">
+              <div v-if="googleModels.length && googleExpanded" class="px-3 py-2">
                 <div class="flex items-center gap-2 mb-2">
                   <input
                     v-model="googleSearch"
@@ -340,7 +480,21 @@ const openrouterEnabledCount = computed(() =>
             <!-- OpenRouter -->
             <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
               <div class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800">
-                <span class="text-xs font-semibold text-gray-600 dark:text-gray-300">OpenRouter</span>
+                <button
+                  v-if="openrouterModels.length"
+                  class="flex items-center gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+                  @click="openrouterExpanded = !openrouterExpanded"
+                >
+                  <svg
+                    class="w-3 h-3 transition-transform duration-150"
+                    :class="openrouterExpanded ? 'rotate-90' : ''"
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                  OpenRouter
+                </button>
+                <span v-else class="text-xs font-semibold text-gray-600 dark:text-gray-300">OpenRouter</span>
                 <div class="flex items-center gap-2">
                   <span v-if="openrouterEnabledCount" class="text-xs text-indigo-500">{{ openrouterEnabledCount }} selected</span>
                   <button
@@ -353,7 +507,7 @@ const openrouterEnabledCount = computed(() =>
                 </div>
               </div>
 
-              <div v-if="openrouterModels.length" class="px-3 py-2">
+              <div v-if="openrouterModels.length && openrouterExpanded" class="px-3 py-2">
                 <div class="flex items-center gap-2 mb-2">
                   <input
                     v-model="openrouterSearch"

@@ -1,5 +1,11 @@
 import { defineStore } from 'pinia'
 
+export interface ContextUrl {
+  url: string
+  content: string
+  scrapedAt: string
+}
+
 export interface ConversationNode {
   id: string
   treeId: string
@@ -10,10 +16,17 @@ export interface ConversationNode {
   branchText: string | null
   branchMessageId: string | null
   branchSummary: string | null
+  contextUrls: ContextUrl[]
   closedAt: string | null
   deletedAt: string | null
   createdAt: string
   children: ConversationNode[]
+}
+
+export interface MessageAttachment {
+  filename: string
+  size: number
+  mimeType: string
 }
 
 export interface Message {
@@ -21,6 +34,10 @@ export interface Message {
   conversationId: string
   role: string
   content: string
+  attachments: MessageAttachment[]
+  fetchedUrls: string[]
+  inputTokens?: number | null
+  outputTokens?: number | null
   createdAt: string
 }
 
@@ -45,6 +62,7 @@ export const useTreeStore = defineStore('tree', {
     streamingConversationId: null as string | null,
     streamingContent: '',
     isStreaming: false,
+    streamingError: null as string | null,
     branchPreview: null as BranchPreview | null,
   }),
 
@@ -63,7 +81,10 @@ export const useTreeStore = defineStore('tree', {
 
       // Build flat map first
       for (const conv of (tree.conversations ?? [])) {
-        this.conversationMap[conv.id] = { ...conv, children: [] }
+        const contextUrls = typeof conv.contextUrls === 'string'
+          ? JSON.parse(conv.contextUrls || '[]')
+          : (conv.contextUrls ?? [])
+        this.conversationMap[conv.id] = { ...conv, contextUrls, children: [] }
       }
 
       // Build parent-child relationships
@@ -94,7 +115,10 @@ export const useTreeStore = defineStore('tree', {
     },
 
     addConversation(conv: ConversationNode) {
-      this.conversationMap[conv.id] = { ...conv, children: [] }
+      const contextUrls = typeof conv.contextUrls === 'string'
+        ? JSON.parse((conv.contextUrls as string) || '[]')
+        : (conv.contextUrls ?? [])
+      this.conversationMap[conv.id] = { ...conv, contextUrls, children: [] }
       if (conv.parentId && this.conversationMap[conv.parentId]) {
         this.conversationMap[conv.parentId].children.push(this.conversationMap[conv.id])
       }
@@ -173,13 +197,14 @@ export const useTreeStore = defineStore('tree', {
       this.streamingConversationId = conversationId
       this.streamingContent = ''
       this.isStreaming = true
+      this.streamingError = null
     },
 
     appendStreamChunk(chunk: string) {
       this.streamingContent += chunk
     },
 
-    finishStreaming() {
+    finishStreaming(inputTokens?: number, outputTokens?: number, error?: string) {
       if (this.streamingConversationId && this.streamingContent) {
         const id = this.streamingConversationId
         const content = this.streamingContent
@@ -190,12 +215,19 @@ export const useTreeStore = defineStore('tree', {
           conversationId: id,
           role: 'assistant',
           content,
+          attachments: [],
+          fetchedUrls: [],
+          inputTokens: inputTokens ?? null,
+          outputTokens: outputTokens ?? null,
           createdAt: new Date().toISOString(),
         })
       }
-      this.streamingConversationId = null
+      // Keep streamingConversationId set when there's an error so the banner
+      // knows which conversation to show it in; clear it on success.
+      if (!error) this.streamingConversationId = null
       this.streamingContent = ''
       this.isStreaming = false
+      this.streamingError = error ?? null
     },
 
     openBranchPreview(payload: Omit<BranchPreview, 'open' | 'isSummarizing' | 'summary'>) {
@@ -228,6 +260,7 @@ export const useTreeStore = defineStore('tree', {
       this.streamingConversationId = null
       this.streamingContent = ''
       this.isStreaming = false
+      this.streamingError = null
       this.branchPreview = null
     },
   },

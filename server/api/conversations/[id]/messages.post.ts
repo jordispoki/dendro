@@ -1,14 +1,40 @@
 import { prisma } from '~/server/utils/prisma'
 import { getLLMProvider } from '~/server/services/llm/index'
 import { buildContext } from '~/server/services/context'
+import { extractUrls, fetchUrlContent } from '~/server/services/urlFetch'
+
+function guessLanguage(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() || ''
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+    py: 'python', json: 'json', md: 'markdown', sh: 'bash', css: 'css',
+    html: 'html', vue: 'vue', rs: 'rust', go: 'go', java: 'java', rb: 'ruby',
+    cpp: 'cpp', c: 'c', cs: 'csharp', php: 'php', swift: 'swift', kt: 'kotlin',
+  }
+  return map[ext] || ext || 'text'
+}
 
 export default defineEventHandler(async (event) => {
   const session = await requireUserSession(event)
   const id = getRouterParam(event, 'id')
-  const { content } = await readBody(event)
+  const { content, attachments = [], explicitUrls = [] } = await readBody(event)
 
   if (!content || typeof content !== 'string') {
     throw createError({ statusCode: 400, message: 'Message content required' })
+  }
+
+  // Validate attachments
+  if (!Array.isArray(attachments)) {
+    throw createError({ statusCode: 400, message: 'attachments must be an array' })
+  }
+  if (attachments.length > 5) {
+    throw createError({ statusCode: 400, message: 'Maximum 5 file attachments per message' })
+  }
+  const MAX_FILE_SIZE = 200 * 1024 // 200 KB
+  for (const att of attachments) {
+    if (att.size > MAX_FILE_SIZE) {
+      throw createError({ statusCode: 400, message: `File "${att.filename}" exceeds 200 KB limit` })
+    }
   }
 
   // Verify ownership
@@ -20,9 +46,16 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, message: 'Conversation not found' })
   }
 
-  // Save user message
-  await prisma.message.create({
-    data: { conversationId: id!, role: 'user', content },
+  // Save user message (strip file content from stored attachments)
+  // fetchedUrls will be updated after fetching below — create with empty first
+  const storedAttachments = attachments.map(({ filename, size, mimeType }: any) => ({ filename, size, mimeType }))
+  const userMessage = await prisma.message.create({
+    data: {
+      conversationId: id!,
+      role: 'user',
+      content,
+      attachments: JSON.stringify(storedAttachments),
+    },
   })
 
   // Get user settings
@@ -31,9 +64,43 @@ export default defineEventHandler(async (event) => {
   })
   const systemPrompt = settings?.systemPrompt || ''
   const streamingEnabled = settings?.streamingEnabled !== false // default true
+  const followSameDomain = settings?.urlFetchSameDomain === true
+
+  // Merge auto-detected URLs from message text with explicitly added URLs (deduplicated)
+  const autoUrls = extractUrls(content)
+  const allUrls = [...new Set([
+    ...(Array.isArray(explicitUrls) ? explicitUrls.filter((u: any) => typeof u === 'string') : []),
+    ...autoUrls,
+  ])]
+  const urlResults = await Promise.allSettled(allUrls.map((url) => fetchUrlContent(url, followSameDomain)))
+  const fetchedUrls = allUrls
+    .map((url, i) => ({
+      url,
+      content: urlResults[i].status === 'fulfilled' ? urlResults[i].value : '',
+    }))
+    .filter((u) => u.content)
+
+  // Persist which URLs were successfully fetched on the user message
+  if (fetchedUrls.length > 0) {
+    await prisma.message.update({
+      where: { id: userMessage.id },
+      data: { fetchedUrls: JSON.stringify(fetchedUrls.map((u) => u.url)) },
+    })
+  }
+
+  // Build file context from attachments
+  let fileContext = ''
+  if (attachments.length > 0) {
+    fileContext = attachments
+      .map((att: any) => {
+        const lang = guessLanguage(att.filename)
+        return `File: ${att.filename}\n\`\`\`${lang}\n${att.content}\n\`\`\``
+      })
+      .join('\n\n')
+  }
 
   // Build context for LLM
-  const messages = await buildContext(id!, systemPrompt, conversation.verbosity)
+  const messages = await buildContext(id!, systemPrompt, conversation.verbosity, fetchedUrls, fileContext)
 
   const llm = getLLMProvider(conversation.model)
   let fullResponse = ''
@@ -41,9 +108,15 @@ export default defineEventHandler(async (event) => {
   if (!streamingEnabled) {
     // Non-streaming: collect full response and return as JSON
     try {
-      await llm.streamChat(messages, (chunk) => { fullResponse += chunk }, conversation.model)
+      const usage = await llm.streamChat(messages, (chunk) => { fullResponse += chunk }, conversation.model)
       await prisma.message.create({
-        data: { conversationId: id!, role: 'assistant', content: fullResponse },
+        data: {
+          conversationId: id!,
+          role: 'assistant',
+          content: fullResponse,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+        },
       })
       return { content: fullResponse }
     } catch (err) {
@@ -62,7 +135,7 @@ export default defineEventHandler(async (event) => {
   })
 
   try {
-    await llm.streamChat(
+    const usage = await llm.streamChat(
       messages,
       (chunk) => {
         fullResponse += chunk
@@ -72,10 +145,16 @@ export default defineEventHandler(async (event) => {
     )
 
     await prisma.message.create({
-      data: { conversationId: id!, role: 'assistant', content: fullResponse },
+      data: {
+        conversationId: id!,
+        role: 'assistant',
+        content: fullResponse,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+      },
     })
 
-    event.node.res.write(`data: ${JSON.stringify({ done: true })}\n\n`)
+    event.node.res.write(`data: ${JSON.stringify({ done: true, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens })}\n\n`)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('LLM streaming error:', msg)

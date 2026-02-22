@@ -29,7 +29,10 @@ model UserSettings {
   defaultConvVerbosity String @default("normal")
   defaultBranchModel   String @default("openrouter/deepseek/deepseek-chat-v3-0324")
   defaultBranchVerbosity String @default("normal")
-  streamingEnabled     Boolean @default(true)
+  streamingEnabled      Boolean @default(true)
+  localExecutionEnabled Boolean @default(false)
+  urlFetchSameDomain    Boolean @default(false)
+  homeLayout            String  @default("select")
   user                 User   @relation(fields: [userId], references: [id])
 }
 
@@ -37,9 +40,12 @@ model Tree {
   id            String         @id @default(cuid())
   userId        String
   title         String
+  contextUrls   String         @default("[]") // JSON: {url,content,scrapedAt}[]
   createdAt     DateTime       @default(now())
+  deletedAt     DateTime?
   user          User           @relation(fields: [userId], references: [id])
   conversations Conversation[]
+  projectFiles  ProjectFile[]
 }
 
 model Conversation {
@@ -53,6 +59,7 @@ model Conversation {
   branchMessageId String?
   branchSummary   String?
   summaryCache    String    @default("{}") // JSON: { [messageId]: summary }
+  contextUrls     String    @default("[]") // JSON: {url,content,scrapedAt}[]
   closedAt        DateTime?
   deletedAt       DateTime?
   createdAt       DateTime       @default(now())
@@ -67,6 +74,19 @@ model Message {
   conversationId String
   role           String
   content        String
+  attachments    String       @default("[]")  // JSON: {filename,size,mimeType}[]
+  fetchedUrls    String       @default("[]")  // JSON: string[]
+  inputTokens    Int?
+  outputTokens   Int?
   createdAt      DateTime     @default(now())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model ProjectFile {
+  id        String   @id @default(cuid())
+  treeId    String
+  name      String
+  content   String
+  createdAt DateTime @default(now())
+  tree      Tree     @relation(fields: [treeId], references: [id], onDelete: Cascade)
 }

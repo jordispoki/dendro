@@ -14,6 +14,9 @@ export interface Settings {
   defaultBranchModel: string
   defaultBranchVerbosity: string
   streamingEnabled: boolean
+  localExecutionEnabled: boolean
+  urlFetchSameDomain: boolean
+  homeLayout: 'select' | 'classic'
 }
 
 const FALLBACK_MODEL = 'openrouter/deepseek/deepseek-chat-v3-0324'

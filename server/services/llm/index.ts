@@ -6,12 +6,17 @@ export interface ChatMessage {
   content: string
 }
 
+export interface UsageMetadata {
+  inputTokens: number
+  outputTokens: number
+}
+
 export interface LLMProvider {
   streamChat(
     messages: ChatMessage[],
     onChunk: (chunk: string) => void,
     model?: string
-  ): Promise<void>
+  ): Promise<UsageMetadata>
 
   summarize(messages: ChatMessage[], model?: string): Promise<string>
 }

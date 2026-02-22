@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import type { ChatMessage, LLMProvider } from './index'
+import type { ChatMessage, LLMProvider, UsageMetadata } from './index'
 
 const DEFAULT_MODEL = 'gemini-2.0-flash-lite'
 
@@ -20,7 +20,7 @@ export class GeminiProvider implements LLMProvider {
     messages: ChatMessage[],
     onChunk: (chunk: string) => void,
     model = DEFAULT_MODEL
-  ): Promise<void> {
+  ): Promise<UsageMetadata> {
     const client = this.getClient()
     const genModel = client.getGenerativeModel({ model: modelName(model) })
 
@@ -48,6 +48,11 @@ export class GeminiProvider implements LLMProvider {
     for await (const chunk of result.stream) {
       const text = chunk.text()
       if (text) onChunk(text)
+    }
+    const response = await result.response
+    return {
+      inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
+      outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
     }
   }
 

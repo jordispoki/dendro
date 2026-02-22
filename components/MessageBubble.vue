@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { marked } from 'marked'
-import { useTreeStore } from '~/stores/treeStore'
+import { useTreeStore, type MessageAttachment } from '~/stores/treeStore'
 import { modelLabel } from '~/composables/useModels'
+import { useExecute } from '~/composables/useExecute'
 
 const props = defineProps<{
   message: {
@@ -9,13 +10,20 @@ const props = defineProps<{
     conversationId: string
     role: string
     content: string
+    attachments: MessageAttachment[]
     createdAt: string
   }
   conversationModel: string
   branchMarks: string[]
 }>()
 
+const emit = defineEmits<{ 'send-output': [content: string] }>()
+
 const store = useTreeStore()
+const { settings } = useSettings()
+const { runCommand } = useExecute()
+
+const localExecutionEnabled = computed(() => settings.value?.localExecutionEnabled === true)
 
 const renderedContent = computed(() => {
   let content = props.message.content
@@ -104,6 +112,15 @@ function handleBranch() {
 // Close popup when clicking outside
 onMounted(() => {
   document.addEventListener('mousedown', onDocMouseDown)
+  if (props.message.role === 'assistant' && localExecutionEnabled.value) {
+    nextTick(() => attachRunButtons())
+  }
+})
+
+onUpdated(() => {
+  if (props.message.role === 'assistant' && localExecutionEnabled.value) {
+    attachRunButtons()
+  }
 })
 
 onUnmounted(() => {
@@ -116,11 +133,126 @@ function onDocMouseDown(e: MouseEvent) {
     popupVisible.value = false
   }
 }
+
+// Run button state per code block
+const blockResults = ref<Map<string, { stdout: string; stderr: string; exitCode: number; isRunning: boolean }>>(new Map())
+const contentRef = ref<HTMLElement | null>(null)
+
+function attachRunButtons() {
+  if (!contentRef.value) return
+  const codeBlocks = contentRef.value.querySelectorAll('pre > code')
+  codeBlocks.forEach((codeEl, idx) => {
+    const pre = codeEl.parentElement as HTMLElement
+    // Skip if already wrapped
+    if (pre.parentElement?.classList.contains('run-block-wrapper')) return
+
+    const wrapper = document.createElement('div')
+    wrapper.className = 'run-block-wrapper relative'
+    pre.parentNode?.insertBefore(wrapper, pre)
+    wrapper.appendChild(pre)
+
+    const blockKey = `block-${props.message.id}-${idx}`
+
+    const btn = document.createElement('button')
+    btn.className = 'run-btn absolute top-2 right-2 px-2 py-0.5 text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 rounded font-mono'
+    btn.textContent = 'Run'
+    btn.addEventListener('click', () => runCodeBlock(codeEl.textContent || '', blockKey, btn))
+    wrapper.appendChild(btn)
+
+    // Result container
+    const resultEl = document.createElement('div')
+    resultEl.className = `run-result-${blockKey}`
+    wrapper.appendChild(resultEl)
+  })
+}
+
+async function runCodeBlock(code: string, blockKey: string, btn: HTMLButtonElement) {
+  btn.textContent = 'Running…'
+  btn.disabled = true
+
+  try {
+    const result = await runCommand(code)
+    blockResults.value.set(blockKey, { ...result, isRunning: false })
+    renderBlockResult(blockKey, code, result)
+  } catch (err: any) {
+    const errResult = { stdout: '', stderr: err?.message || 'Error', exitCode: 1, isRunning: false }
+    blockResults.value.set(blockKey, errResult)
+    renderBlockResult(blockKey, code, errResult)
+  } finally {
+    btn.textContent = 'Run'
+    btn.disabled = false
+  }
+}
+
+function renderBlockResult(
+  blockKey: string,
+  code: string,
+  result: { stdout: string; stderr: string; exitCode: number }
+) {
+  if (!contentRef.value) return
+  const resultEl = contentRef.value.querySelector(`.run-result-${blockKey}`)
+  if (!resultEl) return
+
+  resultEl.innerHTML = ''
+  const container = document.createElement('div')
+  container.className = 'mt-1 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-xs font-mono'
+
+  const output = document.createElement('div')
+  output.className = 'bg-gray-900 px-3 py-2 space-y-1 max-h-40 overflow-y-auto'
+  if (result.stdout) {
+    const s = document.createElement('div')
+    s.className = 'text-green-400 whitespace-pre-wrap'
+    s.textContent = result.stdout
+    output.appendChild(s)
+  }
+  if (result.stderr) {
+    const s = document.createElement('div')
+    s.className = 'text-red-400 whitespace-pre-wrap'
+    s.textContent = result.stderr
+    output.appendChild(s)
+  }
+  const exitEl = document.createElement('div')
+  exitEl.className = 'text-gray-500'
+  exitEl.textContent = `Exit: ${result.exitCode}`
+  output.appendChild(exitEl)
+  container.appendChild(output)
+
+  const footer = document.createElement('div')
+  footer.className = 'flex justify-end px-3 py-1 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700'
+  const sendBtn = document.createElement('button')
+  sendBtn.className = 'text-xs text-indigo-600 dark:text-indigo-400 hover:underline'
+  sendBtn.textContent = 'Send to chat'
+  sendBtn.addEventListener('click', () => {
+    const lines: string[] = [`\`\`\`\n$ ${code.trim().split('\n')[0]}`]
+    if (result.stdout) lines.push(result.stdout)
+    if (result.stderr) lines.push(result.stderr)
+    lines.push(`\`\`\`\nExit code: ${result.exitCode}`)
+    emit('send-output', lines.join('\n'))
+  })
+  footer.appendChild(sendBtn)
+  container.appendChild(footer)
+
+  resultEl.appendChild(container)
+}
 </script>
 
 <template>
   <!-- User message: right-aligned bubble -->
-  <div v-if="message.role === 'user'" class="flex justify-end">
+  <div v-if="message.role === 'user'" class="flex flex-col items-end gap-1.5">
+    <!-- Attachment chips -->
+    <div v-if="message.attachments?.length" class="flex flex-wrap gap-1.5 justify-end">
+      <div
+        v-for="(att, i) in message.attachments"
+        :key="i"
+        class="flex items-center gap-1 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700 rounded-lg px-2 py-0.5 text-xs text-indigo-600 dark:text-indigo-300"
+      >
+        <svg class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+        </svg>
+        <span class="max-w-[120px] truncate">{{ att.filename }}</span>
+      </div>
+    </div>
+
     <div
       class="max-w-[75%] bg-indigo-600 text-white rounded-2xl px-4 py-2.5 text-sm leading-relaxed select-text"
       @mouseup="handleMouseUp"
@@ -149,6 +281,7 @@ function onDocMouseDown(e: MouseEvent) {
   <!-- Assistant message: full-width, no bubble -->
   <div v-else class="w-full">
     <div
+      ref="contentRef"
       class="prose prose-sm dark:prose-invert max-w-none text-gray-900 dark:text-gray-100 select-text"
       @mouseup="handleMouseUp"
       v-html="renderedContent"

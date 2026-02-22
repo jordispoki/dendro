@@ -10,6 +10,9 @@ export default defineEventHandler(async (event) => {
     defaultBranchModel,
     defaultBranchVerbosity,
     streamingEnabled,
+    localExecutionEnabled,
+    urlFetchSameDomain,
+    homeLayout,
   } = await readBody(event)
 
   const updateData: Record<string, any> = {}
@@ -20,6 +23,9 @@ export default defineEventHandler(async (event) => {
   if (defaultBranchModel !== undefined) updateData.defaultBranchModel = defaultBranchModel
   if (defaultBranchVerbosity !== undefined) updateData.defaultBranchVerbosity = defaultBranchVerbosity
   if (streamingEnabled !== undefined) updateData.streamingEnabled = streamingEnabled
+  if (localExecutionEnabled !== undefined) updateData.localExecutionEnabled = localExecutionEnabled
+  if (urlFetchSameDomain !== undefined) updateData.urlFetchSameDomain = urlFetchSameDomain
+  if (homeLayout !== undefined) updateData.homeLayout = homeLayout
 
   const settings = await prisma.userSettings.upsert({
     where: { userId: session.user.id },

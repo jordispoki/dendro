@@ -16,5 +16,9 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, message: 'Conversation not found' })
   }
 
-  return conversation.messages
+  return conversation.messages.map((msg) => ({
+    ...msg,
+    attachments: JSON.parse(msg.attachments || '[]'),
+    fetchedUrls: JSON.parse(msg.fetchedUrls || '[]'),
+  }))
 })

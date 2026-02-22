@@ -1,15 +1,24 @@
 import { useTreeStore } from '~/stores/treeStore'
 
+export interface FileAttachment {
+  filename: string
+  size: number
+  mimeType: string
+  content: string
+}
+
 export function useLLM() {
   const store = useTreeStore()
 
-  async function sendMessage(conversationId: string, content: string) {
+  async function sendMessage(conversationId: string, content: string, attachments: FileAttachment[] = [], explicitUrls: string[] = []) {
     // Optimistically add user message
     store.addMessage(conversationId, {
       id: `user-${Date.now()}`,
       conversationId,
       role: 'user',
       content,
+      attachments: attachments.map(({ filename, size, mimeType }) => ({ filename, size, mimeType })),
+      fetchedUrls: [],
       createdAt: new Date().toISOString(),
     })
 
@@ -20,7 +29,7 @@ export function useLLM() {
       const response = await fetch(`/api/conversations/${conversationId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, attachments, explicitUrls }),
       })
 
       if (!response.ok) {
@@ -57,13 +66,13 @@ export function useLLM() {
               if (data.chunk) {
                 store.appendStreamChunk(data.chunk)
               } else if (data.done) {
-                store.finishStreaming()
+                store.finishStreaming(data.inputTokens, data.outputTokens)
                 // Reload messages from server to get persisted IDs
                 await loadMessages(conversationId)
                 return
               } else if (data.error) {
                 console.error('LLM error:', data.error)
-                store.finishStreaming()
+                store.finishStreaming(undefined, undefined, 'Failed to get a reply. The AI service may be unavailable or rate-limited.')
                 await loadMessages(conversationId)
                 return
               }
@@ -78,7 +87,7 @@ export function useLLM() {
       await loadMessages(conversationId)
     } catch (err) {
       console.error('Send message error:', err)
-      store.finishStreaming()
+      store.finishStreaming(undefined, undefined, 'Failed to send message. Please check your connection and try again.')
       await loadMessages(conversationId)
     }
   }

@@ -32,7 +32,15 @@ const renderedContent = computed(() => {
     const escaped = mark.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     content = content.replace(new RegExp(escaped), `<mark class="branch-mark">$&</mark>`)
   }
-  return marked.parse(content, { breaks: true }) as string
+  return marked.parse(content, {
+    breaks: true,
+    renderer: Object.assign(new marked.Renderer(), {
+      link({ href, title, text }: { href: string; title?: string | null; text: string }) {
+        const t = title ? ` title="${title}"` : ''
+        return `<a href="${href}"${t} target="_blank" rel="noopener noreferrer">${text}</a>`
+      },
+    }),
+  }) as string
 })
 
 // For user messages (plain text), compute split segments for highlighting

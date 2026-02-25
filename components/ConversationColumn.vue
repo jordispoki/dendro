@@ -37,10 +37,13 @@ const urlInputRef = ref<HTMLInputElement | null>(null)
 
 // Terminal panel
 const terminalOpen = ref(false)
+const terminalHostId = ref('')
 const terminalCwd = ref('')
 const terminalCommand = ref('')
 const terminalOutput = ref<{ stdout: string; stderr: string; exitCode: number } | null>(null)
 const terminalRunning = ref(false)
+
+const remoteHosts = computed(() => settings.value?.remoteHosts ?? [])
 
 const messages = computed(() => store.messages[props.conversation.id] || [])
 
@@ -66,7 +69,36 @@ onMounted(async () => {
   if (!store.messages[props.conversation.id] && !store.isStreaming) {
     await loadMessages(props.conversation.id)
   }
+  // Restore saved terminal result when navigating back to a terminal branch
+  if (props.conversation.terminalResult && props.conversation.terminalResult !== '{}') {
+    try {
+      const saved = JSON.parse(props.conversation.terminalResult)
+      if (saved && saved.exitCode !== undefined) {
+        terminalOutput.value = saved
+        terminalCommand.value = props.conversation.branchText || terminalCommand.value
+        terminalOpen.value = true
+      }
+    } catch {}
+  }
 })
+
+// Pre-fill terminal when a run command is queued for this conversation.
+// Using watch with immediate:true so it fires during setup (before the first
+// render) regardless of whether the column starts as sibling or active.
+watch(
+  () => store.pendingTerminalCommands[props.conversation.id],
+  async (pending) => {
+    if (pending) {
+      terminalCommand.value = pending
+      terminalOpen.value = true
+      store.clearPendingTerminalCommand(props.conversation.id)
+      // Auto-execute: user already clicked "Run" on the selection
+      await nextTick()
+      await runTerminalCommand()
+    }
+  },
+  { immediate: true }
+)
 
 watch(
   [messages, () => store.streamingContent],
@@ -193,8 +225,20 @@ async function runTerminalCommand() {
   terminalRunning.value = true
   terminalOutput.value = null
   try {
-    const result = await runCommand(terminalCommand.value, terminalCwd.value || undefined)
+    const result = await runCommand(
+      terminalCommand.value,
+      terminalCwd.value || undefined,
+      terminalHostId.value || undefined,
+      props.conversation.id,
+    )
     terminalOutput.value = result
+    // Persist so the result survives navigation
+    const serialized = JSON.stringify(result)
+    store.updateConversation(props.conversation.id, { terminalResult: serialized })
+    $fetch(`/api/conversations/${props.conversation.id}`, {
+      method: 'PATCH',
+      body: { terminalResult: serialized },
+    }).catch(() => {})
   } finally {
     terminalRunning.value = false
   }
@@ -246,6 +290,89 @@ function handleSendOutput(content: string) {
       class="px-4 py-2 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-100 dark:border-yellow-800 text-xs text-yellow-700 dark:text-yellow-300 shrink-0"
     >
       <span class="font-medium">Branched from:</span> "{{ conversation.branchText.slice(0, 100) }}{{ conversation.branchText.length > 100 ? '…' : '' }}"
+    </div>
+
+    <!-- Terminal panel (top position, active run branch only) -->
+    <div v-if="localExecutionEnabled && role === 'active' && conversation.branchType === 'run'" class="border-b border-gray-200 dark:border-gray-700 shrink-0 bg-white dark:bg-gray-900">
+      <button
+        class="w-full flex items-center justify-between px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+        @click.stop="terminalOpen = !terminalOpen"
+      >
+        <span class="flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          Terminal
+        </span>
+        <svg
+          class="w-3.5 h-3.5 transition-transform"
+          :class="terminalOpen ? 'rotate-180' : ''"
+          fill="none" viewBox="0 0 24 24" stroke="currentColor"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      <div v-if="terminalOpen" class="px-4 pb-3 pt-1 space-y-2">
+        <!-- Host selector (shown only when remote hosts are configured) -->
+        <div v-if="remoteHosts.length" class="flex gap-2 items-center">
+          <svg class="w-3.5 h-3.5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7" />
+          </svg>
+          <select
+            v-model="terminalHostId"
+            class="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+            @click.stop
+          >
+            <option value="">Local</option>
+            <option v-for="h in remoteHosts" :key="h.id" :value="h.id">
+              {{ h.label }} ({{ h.username }}@{{ h.host }}:{{ h.port }})
+            </option>
+          </select>
+        </div>
+
+        <input
+          v-model="terminalCwd"
+          type="text"
+          placeholder="Working directory (optional)"
+          class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+          @click.stop
+        />
+        <div class="flex gap-2">
+          <input
+            v-model="terminalCommand"
+            type="text"
+            placeholder="Command…"
+            class="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+            :disabled="terminalRunning"
+            @click.stop
+            @keydown.stop="terminalKeydown"
+          />
+          <button
+            :disabled="!terminalCommand.trim() || terminalRunning"
+            class="shrink-0 px-3 py-1.5 text-xs font-medium bg-gray-700 dark:bg-gray-600 hover:bg-gray-800 dark:hover:bg-gray-500 disabled:opacity-40 text-white rounded-lg transition-colors"
+            @click.stop="runTerminalCommand"
+          >
+            {{ terminalRunning ? 'Running…' : 'Run' }}
+          </button>
+        </div>
+
+        <div v-if="terminalOutput" class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div class="bg-gray-900 px-3 py-2 space-y-1 max-h-48 overflow-y-auto font-mono text-xs">
+            <div v-if="terminalOutput.stdout" class="text-green-400 whitespace-pre-wrap">{{ terminalOutput.stdout }}</div>
+            <div v-if="terminalOutput.stderr" class="text-red-400 whitespace-pre-wrap">{{ terminalOutput.stderr }}</div>
+            <div class="text-gray-500">Exit: {{ terminalOutput.exitCode }}</div>
+          </div>
+          <div class="flex justify-end px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+            <button
+              class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+              @click.stop="sendOutputToChat"
+            >
+              Send to chat
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Messages -->
@@ -407,71 +534,6 @@ function handleSendOutput(content: string) {
         </button>
       </div>
 
-      <!-- Terminal panel (only when localExecutionEnabled) -->
-      <div v-if="localExecutionEnabled" class="border-t border-gray-200 dark:border-gray-700">
-        <button
-          class="w-full flex items-center justify-between px-4 py-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-          @click.stop="terminalOpen = !terminalOpen"
-        >
-          <span class="flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            Terminal
-          </span>
-          <svg
-            class="w-3.5 h-3.5 transition-transform"
-            :class="terminalOpen ? 'rotate-180' : ''"
-            fill="none" viewBox="0 0 24 24" stroke="currentColor"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        <div v-if="terminalOpen" class="px-4 pb-3 space-y-2">
-          <input
-            v-model="terminalCwd"
-            type="text"
-            placeholder="Working directory (optional)"
-            class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-            @click.stop
-          />
-          <div class="flex gap-2">
-            <input
-              v-model="terminalCommand"
-              type="text"
-              placeholder="Command…"
-              class="flex-1 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-              :disabled="terminalRunning"
-              @click.stop
-              @keydown.stop="terminalKeydown"
-            />
-            <button
-              :disabled="!terminalCommand.trim() || terminalRunning"
-              class="shrink-0 px-3 py-1.5 text-xs font-medium bg-gray-700 dark:bg-gray-600 hover:bg-gray-800 dark:hover:bg-gray-500 disabled:opacity-40 text-white rounded-lg transition-colors"
-              @click.stop="runTerminalCommand"
-            >
-              {{ terminalRunning ? 'Running…' : 'Run' }}
-            </button>
-          </div>
-
-          <div v-if="terminalOutput" class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div class="bg-gray-900 px-3 py-2 space-y-1 max-h-48 overflow-y-auto font-mono text-xs">
-              <div v-if="terminalOutput.stdout" class="text-green-400 whitespace-pre-wrap">{{ terminalOutput.stdout }}</div>
-              <div v-if="terminalOutput.stderr" class="text-red-400 whitespace-pre-wrap">{{ terminalOutput.stderr }}</div>
-              <div class="text-gray-500">Exit: {{ terminalOutput.exitCode }}</div>
-            </div>
-            <div class="flex justify-end px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
-              <button
-                class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
-                @click.stop="sendOutputToChat"
-              >
-                Send to chat
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>

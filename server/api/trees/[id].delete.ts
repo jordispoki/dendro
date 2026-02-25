@@ -1,4 +1,5 @@
 import { prisma } from '~/server/utils/prisma'
+import { logActivity } from '~/server/utils/activityLogger'
 
 export default defineEventHandler(async (event) => {
   const session = await requireUserSession(event)
@@ -20,6 +21,7 @@ export default defineEventHandler(async (event) => {
   await prisma.conversation.deleteMany({ where: { treeId: id! } })
   await prisma.projectFile.deleteMany({ where: { treeId: id! } })
   await prisma.tree.delete({ where: { id } })
+  logActivity(session.user.id, 'tree.deleted', { treeId: id, title: tree.title, hard: true })
 
   return { ok: true }
 })

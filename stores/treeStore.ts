@@ -16,6 +16,8 @@ export interface ConversationNode {
   branchText: string | null
   branchMessageId: string | null
   branchSummary: string | null
+  branchType: string | null
+  terminalResult: string
   contextUrls: ContextUrl[]
   closedAt: string | null
   deletedAt: string | null
@@ -64,6 +66,7 @@ export const useTreeStore = defineStore('tree', {
     isStreaming: false,
     streamingError: null as string | null,
     branchPreview: null as BranchPreview | null,
+    pendingTerminalCommands: {} as Record<string, string>,
   }),
 
   getters: {
@@ -251,6 +254,14 @@ export const useTreeStore = defineStore('tree', {
       this.branchPreview = null
     },
 
+    setPendingTerminalCommand(conversationId: string, command: string) {
+      this.pendingTerminalCommands[conversationId] = command
+    },
+
+    clearPendingTerminalCommand(conversationId: string) {
+      delete this.pendingTerminalCommands[conversationId]
+    },
+
     reset() {
       this.currentTreeId = null
       this.rootConversation = null
@@ -262,6 +273,7 @@ export const useTreeStore = defineStore('tree', {
       this.isStreaming = false
       this.streamingError = null
       this.branchPreview = null
+      this.pendingTerminalCommands = {}
     },
   },
 })

@@ -1,5 +1,6 @@
 import { prisma } from '~/server/utils/prisma'
 import { fetchUrlContent } from '~/server/services/urlFetch'
+import { logActivity } from '~/server/utils/activityLogger'
 
 export interface TreeContextUrl {
   url: string
@@ -40,6 +41,13 @@ export default defineEventHandler(async (event) => {
       { url, content, scrapedAt },
     ]
     await prisma.tree.update({ where: { id }, data: { contextUrls: JSON.stringify(updated) } })
+    logActivity(session.user.id, 'url.scraped', {
+      scope: 'tree',
+      treeId: id,
+      treeTitle: tree.title,
+      url,
+      contentLength: content.length,
+    })
     return { url, scrapedAt, contentLength: content.length }
   }
 
@@ -49,6 +57,12 @@ export default defineEventHandler(async (event) => {
     if (!url) throw createError({ statusCode: 400, message: 'url is required' })
     const updated = existing.filter((u) => u.url !== url)
     await prisma.tree.update({ where: { id }, data: { contextUrls: JSON.stringify(updated) } })
+    logActivity(session.user.id, 'url.removed', {
+      scope: 'tree',
+      treeId: id,
+      treeTitle: tree.title,
+      url,
+    })
     return { ok: true }
   }
 

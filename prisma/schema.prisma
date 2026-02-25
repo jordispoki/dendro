@@ -11,13 +11,25 @@ datasource db {
 }
 
 model User {
-  id        String        @id @default(cuid())
-  email     String        @unique
-  name      String?
-  avatar    String?
-  createdAt DateTime      @default(now())
-  trees     Tree[]
-  settings  UserSettings?
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String?
+  avatar       String?
+  createdAt    DateTime      @default(now())
+  trees        Tree[]
+  settings     UserSettings?
+  activity     ActivityLog[]
+}
+
+model ActivityLog {
+  id             String   @id @default(cuid())
+  userId         String
+  action         String
+  payload        String   @default("{}")
+  treeId         String?
+  conversationId String?
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id])
 }
 
 model UserSettings {
@@ -31,8 +43,12 @@ model UserSettings {
   defaultBranchVerbosity String @default("normal")
   streamingEnabled      Boolean @default(true)
   localExecutionEnabled Boolean @default(false)
+  remoteHosts           String  @default("[]")  // JSON: {id,label,host,port,username,keyPath}[]
+  sshConfigPath         String  @default("")
   urlFetchSameDomain    Boolean @default(false)
   homeLayout            String  @default("select")
+  popupSearchEnabled    Boolean @default(true)
+  popupSummarizeEnabled Boolean @default(true)
   user                 User   @relation(fields: [userId], references: [id])
 }
 
@@ -41,6 +57,7 @@ model Tree {
   userId        String
   title         String
   contextUrls   String         @default("[]") // JSON: {url,content,scrapedAt}[]
+  pinnedAt      DateTime?
   createdAt     DateTime       @default(now())
   deletedAt     DateTime?
   user          User           @relation(fields: [userId], references: [id])
@@ -58,6 +75,8 @@ model Conversation {
   branchText      String?
   branchMessageId String?
   branchSummary   String?
+  branchType      String?   // null = regular; 'run' = created via Run button
+  terminalResult  String    @default("{}") // JSON: { stdout, stderr, exitCode } of last terminal run
   summaryCache    String    @default("{}") // JSON: { [messageId]: summary }
   contextUrls     String    @default("[]") // JSON: {url,content,scrapedAt}[]
   closedAt        DateTime?

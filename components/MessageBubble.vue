@@ -80,6 +80,37 @@ function handleMouseUp(e: MouseEvent) {
   popupVisible.value = true
 }
 
+async function handleRun() {
+  if (!selectedText.value || !store.currentTreeId) return
+  const command = selectedText.value
+  popupVisible.value = false
+
+  try {
+    const conversation = await $fetch<any>('/api/conversations', {
+      method: 'POST',
+      body: {
+        treeId: store.currentTreeId,
+        parentId: props.message.conversationId,
+        title: command.slice(0, 50),
+        model: settings.value?.defaultBranchModel || props.conversationModel,
+        verbosity: 'normal',
+        branchText: command,
+        branchMessageId: props.message.id,
+        branchSummary: null,
+        branchType: 'run',
+      },
+    })
+
+    store.setPendingTerminalCommand(conversation.id, command)
+    store.addConversation(conversation)
+    store.setActiveConversation(conversation.id)
+  } catch (err: any) {
+    console.error('Run branch error:', err)
+    // Re-show popup so the user knows something went wrong
+    popupVisible.value = true
+  }
+}
+
 function handleBranch() {
   if (!selectedText.value) return
 
@@ -273,7 +304,9 @@ function renderBlockResult(
       :x="popupX"
       :y="popupY"
       :selected-text="selectedText"
+      :local-execution-enabled="localExecutionEnabled"
       @branch="handleBranch"
+      @run="handleRun"
       @close="popupVisible = false"
     />
   </div>
@@ -292,7 +325,9 @@ function renderBlockResult(
       :x="popupX"
       :y="popupY"
       :selected-text="selectedText"
+      :local-execution-enabled="localExecutionEnabled"
       @branch="handleBranch"
+      @run="handleRun"
       @close="popupVisible = false"
     />
   </div>

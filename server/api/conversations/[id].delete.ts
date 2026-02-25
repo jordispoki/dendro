@@ -1,4 +1,5 @@
 import { prisma } from '~/server/utils/prisma'
+import { logActivity } from '~/server/utils/activityLogger'
 
 /** Recursively collect all descendant conversation IDs (depth-first, children before parent). */
 async function collectDescendants(id: string): Promise<string[]> {
@@ -38,5 +39,12 @@ export default defineEventHandler(async (event) => {
     await prisma.conversation.delete({ where: { id: cid } })
   }
 
+  logActivity(session.user.id, 'conversation.deleted', {
+    conversationId: id,
+    conversationTitle: conversation.title,
+    treeId: conversation.treeId,
+    treeTitle: conversation.tree.title,
+    title: conversation.title,
+  })
   return { ok: true }
 })

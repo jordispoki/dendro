@@ -19,36 +19,71 @@ interface LogEntry {
   treeTitle: string
 }
 
+const PAGE = 50
+
 const entries = ref<LogEntry[]>([])
 const trees = ref<{ id: string; title: string }[]>([])
 const isLoading = ref(true)
+const isLoadingMore = ref(false)
+const cursor = ref<string | null>(null)
+const hasMore = ref(false)
 
 const selectedTreeId = ref((route.query.dendro as string) || '')
 const sortKey = ref<'createdAt' | 'inputTokens' | 'outputTokens' | 'cost'>('createdAt')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
+function buildParams(before?: string | null) {
+  const params = new URLSearchParams()
+  params.set('limit', String(PAGE))
+  if (selectedTreeId.value) params.set('treeId', selectedTreeId.value)
+  if (before) params.set('before', before)
+  return params.toString()
+}
+
 async function fetchLog() {
   isLoading.value = true
+  entries.value = []
+  cursor.value = null
+  hasMore.value = false
   try {
-    const params = selectedTreeId.value ? `?treeId=${selectedTreeId.value}` : ''
-    entries.value = await $fetch<LogEntry[]>(`/api/log${params}`)
-    // Collect unique trees
-    const treeMap = new Map<string, string>()
-    for (const e of entries.value) treeMap.set(e.treeId, e.treeTitle)
-    // Also load all trees for filter dropdown
-    const allTrees = await $fetch<any[]>('/api/trees')
+    const [data, allTrees] = await Promise.all([
+      $fetch<{ entries: LogEntry[]; hasMore: boolean }>(`/api/log?${buildParams()}`),
+      $fetch<any[]>('/api/trees'),
+    ])
+    entries.value = data.entries
+    hasMore.value = data.hasMore
+    cursor.value = data.entries.at(-1)?.createdAt ?? null
     trees.value = allTrees.map((t) => ({ id: t.id, title: t.title }))
   } finally {
     isLoading.value = false
   }
 }
 
+async function loadMore() {
+  if (!hasMore.value || isLoadingMore.value || !cursor.value) return
+  isLoadingMore.value = true
+  try {
+    const data = await $fetch<{ entries: LogEntry[]; hasMore: boolean }>(
+      `/api/log?${buildParams(cursor.value)}`
+    )
+    entries.value.push(...data.entries)
+    hasMore.value = data.hasMore
+    cursor.value = data.entries.at(-1)?.createdAt ?? cursor.value
+  } finally {
+    isLoadingMore.value = false
+  }
+}
+
 watch(selectedTreeId, async (val) => {
   router.replace({ query: val ? { dendro: val } : {} })
   await fetchLog()
+  startLogStream()
 })
 
-onMounted(fetchLog)
+onMounted(async () => {
+  await fetchLog()
+  startLogStream()
+})
 
 function shortModel(model: string): string {
   return model
@@ -110,7 +145,6 @@ const sortedEntries = computed(() => {
   })
 })
 
-// Aggregate stats over the displayed entries
 const stats = computed(() => {
   let totalIn = 0
   let totalOut = 0
@@ -130,6 +164,48 @@ function formatBigTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
   return String(n)
 }
+
+// null = never connected yet, true = connected, false = disconnected
+const isLive = ref<boolean | null>(null)
+let logSource: EventSource | null = null
+
+function startLogStream() {
+  logSource?.close()
+  logSource = new EventSource('/api/log/stream')
+
+  logSource.onopen = async () => {
+    const isReconnect = isLive.value === false
+    isLive.value = true
+    if (isReconnect) {
+      try {
+        const data = await $fetch<{ entries: LogEntry[]; hasMore: boolean }>(
+          `/api/log?${buildParams()}`
+        )
+        for (const entry of data.entries) {
+          if (!entries.value.some((e) => e.id === entry.id)) {
+            entries.value.unshift(entry)
+          }
+        }
+      } catch {}
+    }
+  }
+
+  logSource.onerror = () => {
+    isLive.value = false
+  }
+
+  logSource.onmessage = (e) => {
+    const entry: LogEntry = JSON.parse(e.data)
+    if (entries.value.some((x) => x.id === entry.id)) return
+    if (!selectedTreeId.value || entry.treeId === selectedTreeId.value) {
+      entries.value.unshift(entry)
+    }
+  }
+}
+
+onUnmounted(() => {
+  logSource?.close()
+})
 </script>
 
 <template>
@@ -150,7 +226,9 @@ function formatBigTokens(n: number): string {
         <svg class="w-4 h-4 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
         </svg>
-        <span class="font-semibold text-gray-900 dark:text-white text-sm">LLM Log</span>
+        <span class="font-semibold text-gray-900 dark:text-white text-sm">LLM Calls</span>
+        <span v-if="isLive === true" class="ml-2 text-xs font-medium text-emerald-500 dark:text-emerald-400">● Live</span>
+        <span v-else-if="isLive === false" class="ml-2 text-xs font-medium text-gray-400 dark:text-gray-500">○ Reconnecting…</span>
       </div>
 
       <div class="flex-1" />
@@ -200,84 +278,117 @@ function formatBigTokens(n: number): string {
         No LLM calls recorded yet.
       </div>
 
-      <table v-else class="w-full text-sm border-collapse">
-        <thead class="sticky top-0 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
-          <tr>
-            <th class="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Dendro</th>
-            <th class="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Branch</th>
-            <th class="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Model</th>
-            <th
-              class="text-right px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap cursor-pointer hover:text-indigo-600 select-none"
-              @click="toggleSort('inputTokens')"
+      <template v-else>
+        <table class="w-full text-sm border-collapse">
+          <thead class="sticky top-0 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
+            <tr>
+              <th class="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Dendro</th>
+              <th class="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Branch</th>
+              <th class="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Model</th>
+              <th
+                class="text-right px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap cursor-pointer hover:text-indigo-600 select-none"
+                @click="toggleSort('inputTokens')"
+              >
+                In <span v-if="sortKey === 'inputTokens'">{{ sortDir === 'desc' ? '↓' : '↑' }}</span>
+              </th>
+              <th
+                class="text-right px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap cursor-pointer hover:text-indigo-600 select-none"
+                @click="toggleSort('outputTokens')"
+              >
+                Out <span v-if="sortKey === 'outputTokens'">{{ sortDir === 'desc' ? '↓' : '↑' }}</span>
+              </th>
+              <th
+                class="text-right px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap cursor-pointer hover:text-indigo-600 select-none"
+                @click="toggleSort('cost')"
+              >
+                Cost <span v-if="sortKey === 'cost'">{{ sortDir === 'desc' ? '↓' : '↑' }}</span>
+              </th>
+              <th
+                class="text-right px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap cursor-pointer hover:text-indigo-600 select-none"
+                @click="toggleSort('createdAt')"
+              >
+                Age <span v-if="sortKey === 'createdAt'">{{ sortDir === 'desc' ? '↓' : '↑' }}</span>
+              </th>
+              <th class="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">Preview</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="(entry, index) in sortedEntries"
+              :key="entry.id"
+              class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-colors"
+              :class="index === 0 && isLive ? 'entry-flash' : ''"
             >
-              In <span v-if="sortKey === 'inputTokens'">{{ sortDir === 'desc' ? '↓' : '↑' }}</span>
-            </th>
-            <th
-              class="text-right px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap cursor-pointer hover:text-indigo-600 select-none"
-              @click="toggleSort('outputTokens')"
-            >
-              Out <span v-if="sortKey === 'outputTokens'">{{ sortDir === 'desc' ? '↓' : '↑' }}</span>
-            </th>
-            <th
-              class="text-right px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap cursor-pointer hover:text-indigo-600 select-none"
-              @click="toggleSort('cost')"
-            >
-              Cost <span v-if="sortKey === 'cost'">{{ sortDir === 'desc' ? '↓' : '↑' }}</span>
-            </th>
-            <th
-              class="text-right px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap cursor-pointer hover:text-indigo-600 select-none"
-              @click="toggleSort('createdAt')"
-            >
-              Age <span v-if="sortKey === 'createdAt'">{{ sortDir === 'desc' ? '↓' : '↑' }}</span>
-            </th>
-            <th class="text-left px-4 py-2.5 font-medium text-gray-500 dark:text-gray-400">Preview</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="entry in sortedEntries"
-            :key="entry.id"
-            class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-colors"
+              <td class="px-4 py-2.5 text-gray-700 dark:text-gray-300 whitespace-nowrap max-w-[140px] truncate">
+                <NuxtLink
+                  :to="`/tree/${entry.treeId}`"
+                  class="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                  :title="entry.treeTitle"
+                >
+                  {{ entry.treeTitle }}
+                </NuxtLink>
+              </td>
+              <td class="px-4 py-2.5 text-gray-600 dark:text-gray-400 whitespace-nowrap max-w-[160px] truncate">
+                <NuxtLink
+                  :to="`/tree/${entry.treeId}`"
+                  class="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                  :title="entry.conversationTitle"
+                >
+                  {{ entry.conversationTitle }}
+                </NuxtLink>
+              </td>
+              <td class="px-4 py-2.5 text-gray-500 dark:text-gray-400 whitespace-nowrap text-xs font-mono">
+                {{ shortModel(entry.model) }}
+              </td>
+              <td class="px-4 py-2.5 text-right text-gray-700 dark:text-gray-300 whitespace-nowrap tabular-nums">
+                {{ formatTokens(entry.inputTokens) }}
+              </td>
+              <td class="px-4 py-2.5 text-right text-gray-700 dark:text-gray-300 whitespace-nowrap tabular-nums">
+                {{ formatTokens(entry.outputTokens) }}
+              </td>
+              <td class="px-4 py-2.5 text-right text-gray-700 dark:text-gray-300 whitespace-nowrap tabular-nums">
+                {{ formatCost(entry.model, entry.inputTokens, entry.outputTokens) }}
+              </td>
+              <td class="px-4 py-2.5 text-right text-gray-400 dark:text-gray-500 whitespace-nowrap text-xs">
+                {{ relativeTime(entry.createdAt) }}
+              </td>
+              <td class="px-4 py-2.5 text-gray-500 dark:text-gray-400 max-w-[240px] truncate text-xs">
+                {{ entry.content.slice(0, 80) }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Load more -->
+        <div class="flex items-center justify-center py-6 border-t border-gray-100 dark:border-gray-800">
+          <button
+            v-if="hasMore"
+            class="px-4 py-2 text-sm font-medium rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+            :disabled="isLoadingMore"
+            @click="loadMore"
           >
-            <td class="px-4 py-2.5 text-gray-700 dark:text-gray-300 whitespace-nowrap max-w-[140px] truncate">
-              <NuxtLink
-                :to="`/tree/${entry.treeId}`"
-                class="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                :title="entry.treeTitle"
-              >
-                {{ entry.treeTitle }}
-              </NuxtLink>
-            </td>
-            <td class="px-4 py-2.5 text-gray-600 dark:text-gray-400 whitespace-nowrap max-w-[160px] truncate">
-              <NuxtLink
-                :to="`/tree/${entry.treeId}`"
-                class="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                :title="entry.conversationTitle"
-              >
-                {{ entry.conversationTitle }}
-              </NuxtLink>
-            </td>
-            <td class="px-4 py-2.5 text-gray-500 dark:text-gray-400 whitespace-nowrap text-xs font-mono">
-              {{ shortModel(entry.model) }}
-            </td>
-            <td class="px-4 py-2.5 text-right text-gray-700 dark:text-gray-300 whitespace-nowrap tabular-nums">
-              {{ formatTokens(entry.inputTokens) }}
-            </td>
-            <td class="px-4 py-2.5 text-right text-gray-700 dark:text-gray-300 whitespace-nowrap tabular-nums">
-              {{ formatTokens(entry.outputTokens) }}
-            </td>
-            <td class="px-4 py-2.5 text-right text-gray-700 dark:text-gray-300 whitespace-nowrap tabular-nums">
-              {{ formatCost(entry.model, entry.inputTokens, entry.outputTokens) }}
-            </td>
-            <td class="px-4 py-2.5 text-right text-gray-400 dark:text-gray-500 whitespace-nowrap text-xs">
-              {{ relativeTime(entry.createdAt) }}
-            </td>
-            <td class="px-4 py-2.5 text-gray-500 dark:text-gray-400 max-w-[240px] truncate text-xs">
-              {{ entry.content.slice(0, 80) }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            <span v-if="isLoadingMore" class="flex items-center gap-2">
+              <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Loading…
+            </span>
+            <span v-else>Load more</span>
+          </button>
+          <span v-else class="text-xs text-gray-400 dark:text-gray-500">All entries loaded</span>
+        </div>
+      </template>
     </div>
   </div>
 </template>
+
+<style scoped>
+@keyframes entry-flash {
+  0%   { background-color: rgb(254 249 195); }
+  100% { background-color: transparent; }
+}
+.entry-flash {
+  animation: entry-flash 1.2s ease-out;
+}
+</style>

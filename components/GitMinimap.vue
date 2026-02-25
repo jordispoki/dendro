@@ -21,6 +21,7 @@ interface MinimapNode {
   isHead: boolean
   messageId: string | null
   isClosed: boolean
+  branchType: string | null
 }
 
 interface MinimapEdge {
@@ -41,12 +42,13 @@ const nodes = computed((): MinimapNode[] => {
     const msgs = store.messages[conv.id] || []
     const x = depth * H_GAP + PADDING
     const isClosed = !!conv.closedAt
+    const branchType = conv.branchType ?? null
     if (msgs.length === 0) {
-      result.push({ id: conv.id, convId: conv.id, title: conv.title, x, y, isHead: true, messageId: null, isClosed })
+      result.push({ id: conv.id, convId: conv.id, title: conv.title, x, y, isHead: true, messageId: null, isClosed, branchType })
       y += CONV_GAP
     } else {
       msgs.forEach((msg, i) => {
-        result.push({ id: msg.id, convId: conv.id, title: i === 0 ? conv.title : '', x, y, isHead: i === 0, messageId: msg.id, isClosed })
+        result.push({ id: msg.id, convId: conv.id, title: i === 0 ? conv.title : '', x, y, isHead: i === 0, messageId: msg.id, isClosed, branchType })
         y += i < msgs.length - 1 ? MSG_GAP : CONV_GAP
       })
     }
@@ -192,11 +194,11 @@ async function navigateTo(convId: string, closeModal = false) {
 </script>
 
 <template>
-  <div class="fixed bottom-4 right-4 z-40 flex items-end gap-2">
+  <div class="fixed bottom-4 left-4 z-40 flex items-end gap-2">
     <!-- Corner minimap panel -->
     <div
       v-show="isOpen"
-      class="absolute bottom-12 right-0 bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-auto transition-all duration-200"
+      class="absolute bottom-12 left-0 bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-auto transition-all duration-200"
       :class="isOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95'"
       style="max-width: 300px; max-height: 340px"
     >
@@ -208,7 +210,7 @@ async function navigateTo(convId: string, closeModal = false) {
             <path v-else :d="bezierPath(edge.x1, edge.y1, edge.x2, edge.y2)" fill="none" stroke="#d1d5db" stroke-width="1.5" class="dark:stroke-gray-600" />
           </template>
           <g v-for="node in nodes" :key="node.id" class="cursor-pointer" :opacity="node.isClosed ? 0.4 : 1" @click="navigateTo(node.convId)">
-            <circle v-if="node.isHead" :cx="node.x" :cy="node.y" :r="HEAD_R" :fill="node.isClosed ? 'transparent' : (store.activeConversationId === node.convId ? '#6366f1' : 'white')" :stroke="node.isClosed ? '#9ca3af' : (store.activeConversationId === node.convId ? '#6366f1' : '#9ca3af')" stroke-width="1.5" :stroke-dasharray="node.isClosed ? '2 2' : 'none'" class="dark:fill-gray-900" />
+            <circle v-if="node.isHead" :cx="node.x" :cy="node.y" :r="HEAD_R" :fill="node.isClosed ? 'transparent' : (store.activeConversationId === node.convId ? '#6366f1' : node.branchType === 'run' ? '#10b981' : 'white')" :stroke="node.isClosed ? '#9ca3af' : (store.activeConversationId === node.convId ? '#6366f1' : node.branchType === 'run' ? '#10b981' : '#9ca3af')" stroke-width="1.5" :stroke-dasharray="node.isClosed ? '2 2' : 'none'" class="dark:fill-gray-900" />
             <circle v-else :cx="node.x" :cy="node.y" :r="MSG_R" :fill="node.isClosed ? '#e5e7eb' : (store.activeConversationId === node.convId ? '#818cf8' : '#d1d5db')" class="dark:fill-gray-600" />
             <text v-if="node.isHead" :x="node.x + HEAD_R + 5" :y="node.y + 4" font-size="9" :fill="node.isClosed ? '#9ca3af' : '#6b7280'" class="pointer-events-none select-none">
               {{ node.title.slice(0, 20) }}{{ node.title.length > 20 ? '…' : '' }}
@@ -312,7 +314,7 @@ async function navigateTo(convId: string, closeModal = false) {
                   <path v-else :d="bezierPath(edge.x1, edge.y1, edge.x2, edge.y2)" fill="none" stroke="#d1d5db" stroke-width="1.5" class="dark:stroke-gray-600" />
                 </template>
                 <g v-for="node in nodes" :key="'n-' + node.id" class="cursor-pointer" :opacity="node.isClosed ? 0.4 : 1" @click.stop="navigateTo(node.convId, true)">
-                  <circle v-if="node.isHead" :cx="node.x" :cy="node.y" :r="HEAD_R" :fill="node.isClosed ? 'transparent' : (store.activeConversationId === node.convId ? '#6366f1' : 'white')" :stroke="node.isClosed ? '#9ca3af' : (store.activeConversationId === node.convId ? '#6366f1' : '#9ca3af')" stroke-width="1.5" :stroke-dasharray="node.isClosed ? '2 2' : 'none'" class="dark:fill-gray-900" />
+                  <circle v-if="node.isHead" :cx="node.x" :cy="node.y" :r="HEAD_R" :fill="node.isClosed ? 'transparent' : (store.activeConversationId === node.convId ? '#6366f1' : node.branchType === 'run' ? '#10b981' : 'white')" :stroke="node.isClosed ? '#9ca3af' : (store.activeConversationId === node.convId ? '#6366f1' : node.branchType === 'run' ? '#10b981' : '#9ca3af')" stroke-width="1.5" :stroke-dasharray="node.isClosed ? '2 2' : 'none'" class="dark:fill-gray-900" />
                   <circle v-else :cx="node.x" :cy="node.y" :r="MSG_R" :fill="node.isClosed ? '#e5e7eb' : (store.activeConversationId === node.convId ? '#818cf8' : '#d1d5db')" class="dark:fill-gray-600" />
                   <text v-if="node.isHead" :x="node.x + HEAD_R + 5" :y="node.y + 4" font-size="9" :fill="node.isClosed ? '#9ca3af' : '#6b7280'" class="pointer-events-none select-none">
                     {{ node.title.slice(0, 40) }}{{ node.title.length > 40 ? '…' : '' }}
@@ -322,7 +324,7 @@ async function navigateTo(convId: string, closeModal = false) {
             </svg>
 
             <!-- Hint -->
-            <p class="absolute bottom-3 right-4 text-xs text-gray-400 dark:text-gray-600 pointer-events-none select-none">
+            <p class="absolute bottom-3 left-4 text-xs text-gray-400 dark:text-gray-600 pointer-events-none select-none">
               Scroll to zoom · drag to pan · click node to navigate
             </p>
           </div>

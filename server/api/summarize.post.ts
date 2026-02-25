@@ -1,5 +1,6 @@
 import { prisma } from '~/server/utils/prisma'
 import { getLLMProvider } from '~/server/services/llm/index'
+import { logActivity } from '~/server/utils/activityLogger'
 
 export default defineEventHandler(async (event) => {
   const session = await requireUserSession(event)
@@ -48,6 +49,16 @@ export default defineEventHandler(async (event) => {
   } catch (err: any) {
     console.warn('Summarize LLM error (using fallback):', err?.message || err)
   }
+
+  logActivity(session.user.id, 'summary.prepared', {
+    conversationId,
+    conversationTitle: conversation.title,
+    treeId: conversation.treeId,
+    treeTitle: conversation.tree.title,
+    model: conversation.model,
+    messageCount: chatMessages.length,
+    cached: false,
+  })
 
   // Save to cache
   if (upToMessageId && summary) {

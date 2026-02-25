@@ -44,6 +44,13 @@ onMounted(async () => {
 
     isLoading.value = false
 
+    // Deep-link to a specific conversation (e.g. from activity log)
+    const targetConvId = route.query.conv as string | undefined
+    if (targetConvId && store.conversationMap[targetConvId]) {
+      store.setActiveConversation(targetConvId)
+      router.replace({ path: route.path })
+    }
+
     const initialMessage = route.query.m as string | undefined
     if (initialMessage && store.activeConversationId) {
       router.replace({ path: route.path })

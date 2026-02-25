@@ -86,6 +86,25 @@ async function saveRename(tree: any) {
   }
 }
 
+async function togglePin(tree: any, event: MouseEvent) {
+  event.preventDefault()
+  const pinnedAt = tree.pinnedAt ? null : new Date().toISOString()
+  try {
+    await $fetch(`/api/trees/${tree.id}`, {
+      method: 'PATCH',
+      body: { pinnedAt },
+    })
+    tree.pinnedAt = pinnedAt
+    // Re-sort: pinned items to top
+    dendros.value = [
+      ...dendros.value.filter((t) => t.pinnedAt),
+      ...dendros.value.filter((t) => !t.pinnedAt),
+    ]
+  } catch (err) {
+    console.error('Pin error:', err)
+  }
+}
+
 async function deleteDendro(tree: any, event: MouseEvent) {
   event.preventDefault()
   const label = dangerMode.value ? 'permanently delete' : 'delete'
@@ -166,6 +185,21 @@ async function logout() {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
               </svg>
               <span class="text-sm text-white/90 truncate flex-1">{{ tree.title }}</span>
+              <!-- Pin button -->
+              <button
+                :class="[
+                  'transition-all shrink-0',
+                  tree.pinnedAt
+                    ? 'text-amber-400 hover:text-amber-300'
+                    : 'opacity-0 group-hover:opacity-100 text-white/40 hover:text-amber-400',
+                ]"
+                :title="tree.pinnedAt ? 'Unpin' : 'Pin to top'"
+                @click.prevent="togglePin(tree, $event)"
+              >
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                </svg>
+              </button>
               <button
                 class="opacity-0 group-hover:opacity-100 text-white/40 hover:text-white/80 transition-all shrink-0"
                 title="Rename"
@@ -214,6 +248,15 @@ async function logout() {
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+        </NuxtLink>
+        <NuxtLink
+          to="/activity"
+          class="text-white/40 hover:text-white/80 transition-colors"
+          title="Activity"
+        >
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </NuxtLink>
         <button
@@ -434,7 +477,12 @@ async function logout() {
           <div
             v-for="tree in dendros"
             :key="tree.id"
-            class="group bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 px-4 py-3 flex items-center gap-3 hover:border-indigo-200 dark:hover:border-indigo-700 transition-colors"
+            :class="[
+              'group bg-white dark:bg-gray-900 rounded-xl border px-4 py-3 flex items-center gap-3 transition-colors',
+              tree.pinnedAt
+                ? 'border-amber-200 dark:border-amber-800/50 hover:border-amber-300 dark:hover:border-amber-700'
+                : 'border-gray-100 dark:border-gray-800 hover:border-indigo-200 dark:hover:border-indigo-700',
+            ]"
           >
             <NuxtLink :to="`/tree/${tree.id}`" class="flex-1 min-w-0">
               <div v-if="renamingId !== tree.id" class="flex items-center gap-2">
@@ -442,6 +490,9 @@ async function logout() {
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
                 </svg>
                 <span class="text-sm font-medium text-gray-900 dark:text-white truncate">{{ tree.title }}</span>
+                <svg v-if="tree.pinnedAt" class="w-3 h-3 text-amber-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                </svg>
               </div>
               <input
                 v-else
@@ -457,6 +508,21 @@ async function logout() {
                 {{ new Date(tree.createdAt).toLocaleDateString() }}
               </div>
             </NuxtLink>
+            <!-- Pin button -->
+            <button
+              :class="[
+                'transition-all shrink-0',
+                tree.pinnedAt
+                  ? 'text-amber-400 hover:text-amber-500'
+                  : 'opacity-0 group-hover:opacity-100 text-gray-400 hover:text-amber-400',
+              ]"
+              :title="tree.pinnedAt ? 'Unpin' : 'Pin to top'"
+              @click.prevent="togglePin(tree, $event)"
+            >
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+              </svg>
+            </button>
             <button
               class="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-all"
               title="Rename"

@@ -4,10 +4,16 @@ const props = defineProps<{
   y: number
   visible: boolean
   selectedText: string
+  localExecutionEnabled?: boolean
 }>()
+
+const { settings } = useSettings()
+const popupSearchEnabled = computed(() => settings.value?.popupSearchEnabled !== false)
+const popupSummarizeEnabled = computed(() => settings.value?.popupSummarizeEnabled !== false)
 
 const emit = defineEmits<{
   branch: []
+  run: []
   close: []
 }>()
 
@@ -65,6 +71,7 @@ watch(() => props.visible, (v) => {
 
       <!-- Search -->
       <button
+        v-if="popupSearchEnabled"
         class="flex items-center gap-1.5 px-3 py-1.5 bg-sky-500 hover:bg-sky-600 text-white text-xs font-medium rounded-full transition-colors"
         title="Search Google"
         @click="handleSearch"
@@ -78,6 +85,7 @@ watch(() => props.visible, (v) => {
 
       <!-- Summarize to clipboard -->
       <button
+        v-if="popupSummarizeEnabled"
         class="flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-medium rounded-full transition-colors"
         :class="{
           'bg-violet-500 hover:bg-violet-600': summarizeState === 'idle',
@@ -105,6 +113,21 @@ watch(() => props.visible, (v) => {
         <span v-if="summarizeState === 'done'">Copied!</span>
         <span v-else-if="summarizeState === 'error'">Error</span>
         <span v-else>Summarize</span>
+      </button>
+
+      <!-- Run -->
+      <button
+        v-if="localExecutionEnabled"
+        class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-medium rounded-full transition-colors"
+        title="Run as command in new branch"
+        @click="emit('run')"
+        @mousedown.prevent
+      >
+        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        </svg>
+        Run
       </button>
     </div>
   </Teleport>

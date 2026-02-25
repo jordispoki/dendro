@@ -2,6 +2,8 @@ import { prisma } from '~/server/utils/prisma'
 import { getLLMProvider } from '~/server/services/llm/index'
 import { buildContext } from '~/server/services/context'
 import { extractUrls, fetchUrlContent } from '~/server/services/urlFetch'
+import { logActivity } from '~/server/utils/activityLogger'
+import { logBus } from '~/server/utils/logBus'
 
 function guessLanguage(filename: string): string {
   const ext = filename.split('.').pop()?.toLowerCase() || ''
@@ -44,6 +46,27 @@ export default defineEventHandler(async (event) => {
   })
   if (!conversation || conversation.tree.userId !== session.user.id) {
     throw createError({ statusCode: 404, message: 'Conversation not found' })
+  }
+
+  function buildLogEntry(msg: {
+    id: string
+    createdAt: Date
+    content: string
+    inputTokens: number | null
+    outputTokens: number | null
+  }) {
+    return {
+      id: msg.id,
+      createdAt: msg.createdAt.toISOString(),
+      content: msg.content,
+      inputTokens: msg.inputTokens,
+      outputTokens: msg.outputTokens,
+      model: conversation.model,
+      conversationId: conversation.id,
+      conversationTitle: conversation.title,
+      treeId: conversation.treeId,
+      treeTitle: conversation.tree.title,
+    }
   }
 
   // Save user message (strip file content from stored attachments)
@@ -99,8 +122,34 @@ export default defineEventHandler(async (event) => {
       .join('\n\n')
   }
 
+  logActivity(session.user.id, 'message.sent', {
+    conversationId: id,
+    conversationTitle: conversation.title,
+    treeId: conversation.treeId,
+    treeTitle: conversation.tree.title,
+    model: conversation.model,
+    inputLength: content.length,
+  })
+
   // Build context for LLM
   const messages = await buildContext(id!, systemPrompt, conversation.verbosity, fetchedUrls, fileContext)
+
+  const contextChars = messages.reduce((sum, m) => sum + m.content.length, 0)
+  logActivity(session.user.id, 'context.built', {
+    conversationId: id,
+    conversationTitle: conversation.title,
+    treeId: conversation.treeId,
+    treeTitle: conversation.tree.title,
+    model: conversation.model,
+    hasBranchSummary: !!conversation.branchSummary,
+    contextUrlCount: JSON.parse(conversation.contextUrls || '[]').length,
+    fetchedUrlCount: fetchedUrls.length,
+    failedUrlCount: allUrls.length - fetchedUrls.length,
+    attachmentCount: attachments.length,
+    attachmentNames: attachments.map((a: any) => a.filename),
+    contextTurns: messages.length,
+    contextChars,
+  })
 
   const llm = getLLMProvider(conversation.model)
   let fullResponse = ''
@@ -109,7 +158,7 @@ export default defineEventHandler(async (event) => {
     // Non-streaming: collect full response and return as JSON
     try {
       const usage = await llm.streamChat(messages, (chunk) => { fullResponse += chunk }, conversation.model)
-      await prisma.message.create({
+      const savedMsg = await prisma.message.create({
         data: {
           conversationId: id!,
           role: 'assistant',
@@ -118,6 +167,7 @@ export default defineEventHandler(async (event) => {
           outputTokens: usage.outputTokens,
         },
       })
+      logBus.emit('log', { userId: session.user.id, entry: buildLogEntry(savedMsg) })
       return { content: fullResponse }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -144,7 +194,7 @@ export default defineEventHandler(async (event) => {
       conversation.model
     )
 
-    await prisma.message.create({
+    const savedMsg = await prisma.message.create({
       data: {
         conversationId: id!,
         role: 'assistant',
@@ -153,6 +203,7 @@ export default defineEventHandler(async (event) => {
         outputTokens: usage.outputTokens,
       },
     })
+    logBus.emit('log', { userId: session.user.id, entry: buildLogEntry(savedMsg) })
 
     event.node.res.write(`data: ${JSON.stringify({ done: true, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens })}\n\n`)
   } catch (err) {

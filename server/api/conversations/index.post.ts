@@ -1,9 +1,10 @@
 import { prisma } from '~/server/utils/prisma'
+import { logActivity } from '~/server/utils/activityLogger'
 
 export default defineEventHandler(async (event) => {
   const session = await requireUserSession(event)
   const body = await readBody(event)
-  const { treeId, parentId, title, model, verbosity, branchText, branchMessageId, branchSummary } = body
+  const { treeId, parentId, title, model, verbosity, branchText, branchMessageId, branchSummary, branchType } = body
 
   if (!treeId || !title) {
     throw createError({ statusCode: 400, message: 'treeId and title required' })
@@ -25,8 +26,17 @@ export default defineEventHandler(async (event) => {
       branchText: branchText || null,
       branchMessageId: branchMessageId || null,
       branchSummary: branchSummary || null,
+      branchType: branchType || null,
     },
   })
 
+  logActivity(session.user.id, 'conversation.created', {
+    conversationId: conversation.id,
+    conversationTitle: title,
+    treeId,
+    treeTitle: tree.title,
+    title,
+    isBranch: !!parentId,
+  })
   return conversation
 })

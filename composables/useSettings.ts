@@ -4,6 +4,16 @@ export interface ModelEntry {
   free?: boolean
 }
 
+export interface RemoteHost {
+  id: string
+  label: string
+  host: string
+  port: number
+  username: string
+  keyPath: string
+  sshOptions: string
+}
+
 export interface Settings {
   id: string
   userId: string
@@ -15,8 +25,12 @@ export interface Settings {
   defaultBranchVerbosity: string
   streamingEnabled: boolean
   localExecutionEnabled: boolean
+  remoteHosts: RemoteHost[]
   urlFetchSameDomain: boolean
   homeLayout: 'select' | 'classic'
+  sshConfigPath: string
+  popupSearchEnabled: boolean
+  popupSummarizeEnabled: boolean
 }
 
 const FALLBACK_MODEL = 'openrouter/deepseek/deepseek-chat-v3-0324'

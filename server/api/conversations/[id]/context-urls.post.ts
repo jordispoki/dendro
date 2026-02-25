@@ -1,5 +1,6 @@
 import { prisma } from '~/server/utils/prisma'
 import { fetchUrlContent } from '~/server/services/urlFetch'
+import { logActivity } from '~/server/utils/activityLogger'
 
 export interface ContextUrl {
   url: string
@@ -48,5 +49,14 @@ export default defineEventHandler(async (event) => {
     data: { contextUrls: JSON.stringify(updated) },
   })
 
+  logActivity(session.user.id, 'url.scraped', {
+    scope: 'conversation',
+    conversationId: id,
+    conversationTitle: conversation.title,
+    treeId: conversation.treeId,
+    treeTitle: conversation.tree.title,
+    url,
+    contentLength: content.length,
+  })
   return { url, scrapedAt: updated[updated.length - 1].scrapedAt, contentLength: content.length }
 })

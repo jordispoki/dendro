@@ -1,4 +1,5 @@
 import { prisma } from '~/server/utils/prisma'
+import { logActivity } from '~/server/utils/activityLogger'
 
 export default defineEventHandler(async (event) => {
   const session = await requireUserSession(event)
@@ -30,6 +31,12 @@ export default defineEventHandler(async (event) => {
     }
     const file = await prisma.projectFile.create({
       data: { treeId: treeId!, name: name.trim(), content },
+    })
+    logActivity(session.user.id, 'file.uploaded', {
+      treeId: treeId!,
+      treeTitle: tree.title,
+      filename: file.name,
+      size: content.length,
     })
     return file
   }

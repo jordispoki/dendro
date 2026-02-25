@@ -1,4 +1,5 @@
 import { prisma } from '~/server/utils/prisma'
+import { logActivity } from '~/server/utils/activityLogger'
 
 export default defineEventHandler(async (event) => {
   const session = await requireUserSession(event)
@@ -25,5 +26,6 @@ export default defineEventHandler(async (event) => {
     },
   })
 
+  logActivity(session.user.id, 'tree.created', { treeId: tree.id, title: tree.title })
   return tree
 })

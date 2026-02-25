@@ -11,6 +11,8 @@ export default defineEventHandler(async (event) => {
 
   return {
     ...settings,
-    enabledModels: JSON.parse(settings.enabledModels || '[]'),
+    enabledModels:  JSON.parse(settings.enabledModels || '[]'),
+    remoteHosts:    JSON.parse(settings.remoteHosts   || '[]'),
+    sshConfigPath:  settings.sshConfigPath ?? '',
   }
 })

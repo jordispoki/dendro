@@ -1,4 +1,5 @@
 import { prisma } from '~/server/utils/prisma'
+import { logActivity } from '~/server/utils/activityLogger'
 import type { ContextUrl } from './context-urls.post'
 
 export default defineEventHandler(async (event) => {
@@ -22,6 +23,15 @@ export default defineEventHandler(async (event) => {
   await prisma.conversation.update({
     where: { id },
     data: { contextUrls: JSON.stringify(updated) },
+  })
+
+  logActivity(session.user.id, 'url.removed', {
+    scope: 'conversation',
+    conversationId: id,
+    conversationTitle: conversation.title,
+    treeId: conversation.treeId,
+    treeTitle: conversation.tree.title,
+    url,
   })
 
   return { ok: true }

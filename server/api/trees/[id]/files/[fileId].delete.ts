@@ -1,4 +1,5 @@
 import { prisma } from '~/server/utils/prisma'
+import { logActivity } from '~/server/utils/activityLogger'
 
 export default defineEventHandler(async (event) => {
   const session = await requireUserSession(event)
@@ -12,6 +13,7 @@ export default defineEventHandler(async (event) => {
       treeId: treeId!,
       tree: { userId: session.user.id },
     },
+    include: { tree: true },
   })
 
   if (!file) {
@@ -19,6 +21,7 @@ export default defineEventHandler(async (event) => {
   }
 
   await prisma.projectFile.delete({ where: { id: fileId! } })
+  logActivity(session.user.id, 'file.deleted', { treeId: treeId!, treeTitle: file.tree.title, filename: file.name })
 
   return { ok: true }
 })

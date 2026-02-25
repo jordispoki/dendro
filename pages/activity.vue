@@ -1,6 +1,8 @@
 <script setup lang="ts">
 definePageMeta({ middleware: 'auth' })
 
+const route = useRoute()
+
 interface ActivityEntry {
   id: string
   action: string
@@ -102,6 +104,10 @@ watch(selectedTreeId, () => {
 watch(selectedConversationId, fetchActivity)
 
 onMounted(async () => {
+  // Pre-apply treeId filter from query param (e.g. linked from tree page navbar)
+  if (route.query.treeId) {
+    selectedTreeId.value = route.query.treeId as string
+  }
   const [, allTrees] = await Promise.all([
     fetchActivity(),
     $fetch<any[]>('/api/trees'),
